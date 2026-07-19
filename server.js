@@ -1,20 +1,63 @@
-    at Module._load (node:internal/modules/cjs/loader:1019:12)
-    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:128:12)
-    at node:internal/main/run_main_module:28:49
-Node.js v18.20.8
-==> Exited with status 1
-==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
-==> Running 'npm start'
-> golf-tee-scraper@1.0.0 start
-> node server.js
-/opt/render/project/src/server.js:60
-SyntaxError: Unexpected end of input
-    at internalCompileFunction (node:internal/vm:76:18)
-    at wrapSafe (node:internal/modules/cjs/loader:1283:20)
-    at Module._compile (node:internal/modules/cjs/loader:1328:27)
-    at Module._extensions..js (node:internal/modules/cjs/loader:1422:10)
-    at Module.load (node:internal/modules/cjs/loader:1203:32)
-    at Module._load (node:internal/modules/cjs/loader:1019:12)
-    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:128:12)
-    at node:internal/main/run_main_module:28:49
-Node.js v18.20.8
+const express = require('express');
+const cors = require('cors');
+const https = require('https');
+const http = require('http');
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+const COURSES = {
+  vancouver: {
+    url: 'https://golfvancouver.cps.golf/',
+    courses: ['Langara Golf Club', 'Fraserview Golf Course']
+  },
+  burnaby: {
+    url: 'https://golfburnaby.cps.golf/',
+    courses: ['Burnaby Mountain Golf Club', 'Riverway Golf Course']
+  }
+};
+
+function fetchURL(url) {
+  return new Promise((resolve, reject) => {
+    const protocol = url.startsWith('https') ? https : http;
+    const timeout = setTimeout(() => reject(new Error('Timeout')), 10000);
+    
+    protocol.get(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    }, (res) => {
+      clearTimeout(timeout);
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(data));
+    }).on('error', err => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
+}
+
+function extractTeeTimes(html) {
+  const timeRegex = /(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)/gi;
+  const matches = html.matchAll(timeRegex);
+  const uniqueTimes = new Set();
+  
+  for (const match of matches) {
+    const hour = parseInt(match[1]);
+    const min = match[2];
+    const period = match[3].toUpperCase();
+    const hour24 = period === 'PM' && hour !== 12 ? hour + 12 : (period === 'AM' && hour === 12 ? 0 : hour);
+    
+    if (hour24 >= 6 && hour24 <= 21) {
+      uniqueTimes.add(`${hour}:${min} ${period}`);
+    }
+  }
+  
+  return Array.from(uniqueTimes).sort();
+}
+
+async function scrapeTeeTimesFromSite(clubUrl, date, players) {
+  try {
+    let url = clubUrl;
+    if (date) url += `?date=${date}`;
+    if (players) url += (date ? '&' : '?') +
